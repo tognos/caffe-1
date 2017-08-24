@@ -27,19 +27,22 @@ class SGDSolver : public Solver {
  protected:
   void PreSolve();
   float GetLearningRate();
+  float GetMomentum();
+  float GetLocalRate(int param_id) const;
   float local_decay(int param_id) const;
-  void ApplyUpdate(int param_id, void* handle, bool clear_grads) override;
 
+  void ApplyUpdate(int param_id, void* handle, bool clear_grads) override;
   virtual void Normalize(int param_id, void* handle);
   virtual void Regularize(int param_id, void* handle);
-  virtual void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads,
-      bool synced);
+  virtual void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads);
   virtual void ClipGradients(void* handle = nullptr);
   virtual void SnapshotSolverState(const string& model_filename);
   virtual void SnapshotSolverStateToBinaryProto(const string& model_filename);
   virtual void SnapshotSolverStateToHDF5(const string& model_filename);
   virtual void RestoreSolverStateFromHDF5(const string& state_file);
   virtual void RestoreSolverStateFromBinaryProto(const string& state_file);
+  void PrintParams(int param_id);
+
   // history maintains the historical momentum data.
   // update maintains update related data and is not needed in snapshots.
   // temp maintains other information that might be needed in computation
@@ -61,8 +64,7 @@ class NesterovSolver : public SGDSolver<Dtype> {
   virtual inline const char* type() const { return "Nesterov"; }
 
  protected:
-  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads,
-      bool synced) override;
+  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads) override;
 
   DISABLE_COPY_MOVE_AND_ASSIGN(NesterovSolver);
 };
@@ -81,8 +83,7 @@ class AdaGradSolver : public SGDSolver<Dtype> {
   virtual inline const char* type() const { return "AdaGrad"; }
 
  protected:
-  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads,
-      bool synced) override;
+  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads) override;
   void constructor_sanity_check() {
     CHECK_EQ(0, this->param_.momentum())
         << "Momentum cannot be used with AdaGrad.";
@@ -106,8 +107,7 @@ class RMSPropSolver : public SGDSolver<Dtype> {
   virtual inline const char* type() const { return "RMSProp"; }
 
  protected:
-  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads,
-      bool synced) override;
+  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads) override;
   void constructor_sanity_check() {
     CHECK_EQ(0, this->param_.momentum())
         << "Momentum cannot be used with RMSProp.";
@@ -133,8 +133,7 @@ class AdaDeltaSolver : public SGDSolver<Dtype> {
 
  protected:
   void AdaDeltaPreSolve();
-  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads,
-      bool synced) override;
+  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads) override;
 
   DISABLE_COPY_MOVE_AND_ASSIGN(AdaDeltaSolver);
 };
@@ -160,8 +159,7 @@ class AdamSolver : public SGDSolver<Dtype> {
 
  protected:
   void AdamPreSolve();
-  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads,
-      bool synced) override;
+  void ComputeUpdateValue(int param_id, void* handle, float rate, bool clear_grads) override;
 
   DISABLE_COPY_MOVE_AND_ASSIGN(AdamSolver);
 };

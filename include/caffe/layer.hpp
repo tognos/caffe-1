@@ -53,7 +53,6 @@ class LayerBase {
         debug_(false),
         fm_by_user_(false),
         bm_by_user_(false),
-        piter_(nullptr),
         parent_net_(nullptr),
         net_inititialized_flag_(nullptr),
         net_iteration0_flag_(nullptr),
@@ -130,8 +129,6 @@ class LayerBase {
    */
   virtual inline const char* type() const { return ""; }
 
-  virtual bool bias_term() const { return false; }  // FIXME
-
   /**
    * @brief Returns the layer name.
    */
@@ -140,17 +137,9 @@ class LayerBase {
   }
 
   // Iteration counter maintained by Solver
-  int iter() const {
-    return piter_ == nullptr ? 0 : *piter_;
-  }
-
-  bool in_setup() const {
-    return piter_ == nullptr;
-  }
-
-  void set_piter(const int* piter) {
-    piter_ = piter;
-  }
+  int iter() const;
+  int relative_iter() const;
+  int iterations_sized() const;
 
   void set_solver_rank(size_t solver_rank) {
     solver_rank_ = solver_rank;
@@ -160,7 +149,7 @@ class LayerBase {
     return parent_net_;
   }
 
-  Solver* parent_solver();
+  const Solver* parent_solver() const;
 
   void set_parent_net(Net* parent_net) {
     parent_net_ = parent_net;
@@ -386,10 +375,16 @@ class LayerBase {
     return nullptr;
   }
 
+  virtual bool skip_apply_update(int blob_id) const {
+    return false;
+  }
+
   /**
    * @brief Writes the layer parameter to a protocol buffer
    */
   virtual void ToProto(LayerParameter* param, bool write_diff = false) = 0;
+
+  std::string print_current_device() const;
 
  protected:
   /** The vector that stores the learnable parameters as a set of blobs. */
@@ -402,10 +397,7 @@ class LayerBase {
   size_t solver_rank_;
   bool debug_;
   bool fm_by_user_, bm_by_user_;
-  const int* piter_;  // pointer to Solver's iter_
-
   Net* parent_net_;
-
   /** Vector indicating whether to compute the diff of each param blob. */
   vector<bool> param_propagate_down_;
 
@@ -616,17 +608,6 @@ Layer<Ftype, Btype>::Backward(const vector<Blob*>& top, const vector<bool>& prop
       break;
     default:
       LOG(FATAL) << "Unknown caffe mode.";
-  }
-}
-
-// Serialize LayerParameter to protocol buffer
-template<typename Ftype, typename Btype>
-void Layer<Ftype, Btype>::ToProto(LayerParameter* param, bool write_diff) {
-  param->Clear();
-  param->CopyFrom(layer_param_);
-  param->clear_blobs();
-  for (int i = 0; i < blobs_.size(); ++i) {
-    blobs_[i]->template ToProto<Btype>(param->add_blobs(), write_diff);
   }
 }
 

@@ -62,7 +62,7 @@ template<typename Ftype, typename Btype>
 BasePrefetchingDataLayer<Ftype, Btype>::BasePrefetchingDataLayer(const LayerParameter& param)
     : BaseDataLayer<Ftype, Btype>(param, threads(param)),
       InternalThread(Caffe::current_device(), this->solver_rank_, threads(param), false),
-      auto_mode_(Caffe::mode() == Caffe::GPU && auto_mode(param)),
+      auto_mode_(Caffe::mode() == Caffe::GPU && this->phase_ == TRAIN && auto_mode(param)),
       parsers_num_(parser_threads(param)),
       transf_num_(threads(param)),
       queues_num_(transf_num_ * parsers_num_),
@@ -79,11 +79,15 @@ BasePrefetchingDataLayer<Ftype, Btype>::~BasePrefetchingDataLayer() {
 template<typename Ftype, typename Btype>
 void BasePrefetchingDataLayer<Ftype, Btype>::LayerSetUp(const vector<Blob*>& bottom,
     const vector<Blob*>& top) {
-  this->rank_ = this->solver_rank_;  // TODO
+  this->rank_ = this->solver_rank_;
   bottom_init_ = bottom;
   top_init_ = top;
   BaseDataLayer<Ftype, Btype>::LayerSetUp(bottom, top);
-  StartInternalThread();
+  const Solver* psolver = this->parent_solver();
+  const uint64_t random_seed = (psolver == nullptr ||
+      static_cast<uint64_t>(psolver->param().random_seed()) == Caffe::SEED_NOT_SET) ?
+          Caffe::next_seed() : static_cast<uint64_t>(psolver->param().random_seed());
+  StartInternalThread(false, random_seed);
 }
 
 template<typename Ftype, typename Btype>
@@ -100,7 +104,6 @@ void BasePrefetchingDataLayer<Ftype, Btype>::InternalThreadEntryN(size_t thread_
   if (iter0 && this->net_inititialized_flag_ != nullptr) {
     this->net_inititialized_flag_->wait();
   } else {  // nothing to wait -> initialize and start pumping
-    std::lock_guard<std::mutex> lock(mutex_in_);
     InitializePrefetch();
     start_reading();
     iter0 = false;
@@ -134,7 +137,6 @@ void BasePrefetchingDataLayer<Ftype, Btype>::InternalThreadEntryN(size_t thread_
         if (this->net_iteration0_flag_ != nullptr) {
           this->net_iteration0_flag_->wait();
         }
-        std::lock_guard<std::mutex> lock(mutex_out_);
         if (this->net_inititialized_flag_ != nullptr) {
           this->net_inititialized_flag_ = nullptr;  // no wait on the second round
           InitializePrefetch();
@@ -191,41 +193,38 @@ void BasePrefetchingDataLayer<Ftype, Btype>::InitializePrefetch() {
   // calls so that the prefetch thread does not accidentally make simultaneous
   // cudaMalloc calls when the main thread is running. In some GPUs this
   // seems to cause failures if we do not so.
-  void* ptr;
-  for (int i = 0; i < prefetch_.size(); ++i) {
-    ptr = prefetch_[i]->data_.mutable_cpu_data();
-    if (this->output_labels_) {
-      ptr = prefetch_[i]->label_.mutable_cpu_data();
-    }
-  }
+  AllocatePrefetch();
+}
+
+template<typename Ftype, typename Btype>
+void BasePrefetchingDataLayer<Ftype, Btype>::AllocatePrefetch() {
 #ifndef CPU_ONLY
   if (Caffe::mode() == Caffe::GPU) {
     const bool use_gpu_transform = this->is_gpu_transform();
     for (int i = 0; i < prefetch_.size(); ++i) {
-      ptr = prefetch_[i]->data_.mutable_gpu_data();
+      prefetch_[i]->data_.allocate_data();
       if (use_gpu_transform) {
-        ptr = prefetch_[i]->random_vec_.mutable_gpu_data();
-        ptr = prefetch_[i]->gpu_transformed_data_->template mutable_gpu_data<Ftype>();
+        prefetch_[i]->random_vec_.allocate_data();
+        prefetch_[i]->gpu_transformed_data_->allocate_data();
       }
       if (this->output_labels_) {
-        ptr = prefetch_[i]->label_.mutable_gpu_data();
+        prefetch_[i]->label_.allocate_data();
       }
     }
   }
+  LOG(INFO) << this->print_current_device() << " Prefetch allocated.";
 #else
   if (Caffe::mode() == Caffe::CPU) {
     for (int i = 0; i < prefetch_.size(); ++i) {
-      ptr = prefetch_[i]->data_.mutable_cpu_data();
+      prefetch_[i]->data_.allocate_data(false);
       if (this->output_labels_) {
-        ptr = prefetch_[i]->label_.mutable_cpu_data();
+        prefetch_[i]->label_.allocate_data(false);
       }
     }
   } else {
     NO_GPU;
   }
 #endif
-  (void) ptr;
-  DLOG(INFO) << "[" << this->target_device_ << "] Prefetch initialized.";
 }
 
 template<typename Ftype, typename Btype>
@@ -234,16 +233,14 @@ void BasePrefetchingDataLayer<Ftype, Btype>::Forward_cpu(const vector<Blob*>& bo
   // Note: this function runs in one thread per object and one object per one Solver thread
   shared_ptr<Batch<Ftype>> batch = prefetches_full_[next_batch_queue_]->pop(
       "Data layer prefetch queue empty");
-  if (this->iter() > 1 && top[0]->data_type() == batch->data_.data_type()
+  if (this->relative_iter() > 1 && top[0]->data_type() == batch->data_.data_type()
       && top[0]->shape() == batch->data_.shape()) {
     top[0]->Swap(batch->data_);
-    DLOG(INFO) << "Prefetch copied";
   } else {
     top[0]->CopyDataFrom(batch->data_, true);
-    DLOG(INFO) << "Labels copied";
   }
   if (this->output_labels_) {
-    if (this->iter() > 1 && top[1]->data_type() == batch->label_.data_type()
+    if (this->relative_iter() > 1 && top[1]->data_type() == batch->label_.data_type()
         && top[1]->shape() == batch->label_.shape()) {
       top[1]->Swap(batch->label_);
     } else {

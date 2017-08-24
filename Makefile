@@ -36,14 +36,15 @@ LIB_BUILD_DIR := $(BUILD_DIR)/lib
 STATIC_NAME := $(LIB_BUILD_DIR)/lib$(LIBRARY_NAME).a
 DYNAMIC_VERSION_MAJOR 		:= 0
 DYNAMIC_VERSION_MINOR 		:= 16
-DYNAMIC_VERSION_REVISION 	:= 1
+DYNAMIC_VERSION_REVISION 	:= 3
 DYNAMIC_NAME_SHORT := lib$(LIBRARY_NAME).so
 DYNAMIC_SONAME_SHORT := $(DYNAMIC_NAME_SHORT).$(DYNAMIC_VERSION_MAJOR).$(DYNAMIC_VERSION_MINOR)
 DYNAMIC_VERSIONED_NAME_SHORT := $(DYNAMIC_SONAME_SHORT).$(DYNAMIC_VERSION_REVISION)
 DYNAMIC_NAME := $(LIB_BUILD_DIR)/$(DYNAMIC_VERSIONED_NAME_SHORT)
 COMMON_FLAGS += -DCAFFE_VERSION=$(DYNAMIC_VERSION_MAJOR).$(DYNAMIC_VERSION_MINOR).$(DYNAMIC_VERSION_REVISION)
-# FP16 Caffe requires C++ 11
+# NVCaffe requires C++ 11
 COMMON_FLAGS += -std=c++11
+COMMON_FLAGS += -DCUDA_NO_HALF
 
 ##############################
 # Get all source files
@@ -166,6 +167,11 @@ NONEMPTY_WARN_REPORT := $(BUILD_DIR)/$(WARNS_EXT)
 ##############################
 # Derive include and lib directories
 ##############################
+ifeq ($(shell uname -m),aarch64)
+    TEGRA=1
+    NO_NVML=1
+endif
+
 CUDA_INCLUDE_DIR := $(CUDA_DIR)/include
 
 CUDA_LIB_DIR :=
@@ -186,7 +192,12 @@ ifneq ($(NO_NVML), 1)
 endif
 endif
 
-LIBRARIES += glog gflags protobuf boost_system boost_filesystem m hdf5_hl hdf5
+LIBRARIES += boost_system glog gflags protobuf boost_filesystem m
+ifeq ($(TEGRA), 1)
+    LIBRARIES += hdf5_serial_hl hdf5_serial
+else
+    LIBRARIES += hdf5_hl hdf5
+endif
 
 # handle IO dependencies
 USE_LEVELDB ?= 1
@@ -703,6 +714,7 @@ $(DISTRIBUTE_DIR): all py | $(DISTRIBUTE_SUBDIRS)
 	cp -r src/caffe/proto $(DISTRIBUTE_DIR)/
 	# add include
 	cp -r include $(DISTRIBUTE_DIR)/
+	cp -r 3rdparty/half_float $(DISTRIBUTE_DIR)/include
 	mkdir -p $(DISTRIBUTE_DIR)/include/caffe/proto
 	cp $(PROTO_GEN_HEADER_SRCS) $(DISTRIBUTE_DIR)/include/caffe/proto
 	# add tool and example binaries

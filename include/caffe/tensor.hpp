@@ -39,10 +39,6 @@ class Tensor {
     return type_;
   }
 
-  void lock_tensor() {
-    locked_ = true;
-  }
-
   size_t size() const {
     return synced_arrays_->size();
   }
@@ -57,7 +53,7 @@ class Tensor {
   void invalidate_others();
 
 #ifndef CPU_ONLY
-  void gpu_set(float value, bool sync, cudaStream_t stream);
+  void gpu_set(float value, cudaStream_t stream);
   void gpu_scale(float new_scale, cublasHandle_t cublas_handle, bool sync);
   float gpu_amax();
   size_t gpu_memory_use() const;
@@ -73,15 +69,15 @@ class Tensor {
     return mem && mem->is_valid();
   }
 
-  void* mutable_memory(Type type, bool is_gpu, bool zero_new_mem = true) {
+  void* mutable_memory(Type type, bool is_gpu) {
     convert(type);
     shared_ptr<SyncedMemory>& mem = mutable_synced_mem();
-    return is_gpu ? mem->mutable_gpu_data(zero_new_mem) : mem->mutable_cpu_data(zero_new_mem);
+    return is_gpu ? mem->mutable_gpu_data() : mem->mutable_cpu_data();
   }
 
-  void* current_mutable_memory(bool is_gpu, bool zero_new_mem = true) {
+  void* current_mutable_memory(bool is_gpu) {
     shared_ptr<SyncedMemory>& mem = mutable_synced_mem();
-    return is_gpu ? mem->mutable_gpu_data(zero_new_mem) : mem->mutable_cpu_data();
+    return is_gpu ? mem->mutable_gpu_data() : mem->mutable_cpu_data();
   }
 
   const void* current_memory(bool is_gpu) {
@@ -96,8 +92,6 @@ class Tensor {
 
   // numerical type stored here at a moment (might change due to conversion)
   Type type_;
-  bool locked_;
-  mutable bool async_state_;
   // array of projections to different types (including current type_)
   shared_ptr<vector<shared_ptr<SyncedMemory>>> synced_arrays_;
   // number of entries - comes from Blob via Reshape

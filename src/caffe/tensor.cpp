@@ -5,8 +5,10 @@
 
 namespace caffe {
 
-Tensor::Tensor(Type dtype) : type_(dtype), locked_(false), async_state_(false), synced_arrays_(
-    make_shared<vector<shared_ptr<SyncedMemory>>>(Type_ARRAYSIZE)), count_(0) {}
+Tensor::Tensor(Type dtype)
+    : type_(dtype),
+      synced_arrays_(make_shared<vector<shared_ptr<SyncedMemory>>>(Type_ARRAYSIZE)),
+      count_(0) {}
 
 const shared_ptr<SyncedMemory>& Tensor::synced_mem() const {
   const shared_ptr<SyncedMemory>& mem = synced_arrays_->at(type_);
@@ -44,7 +46,6 @@ void Tensor::Reshape(int count) {
   const std::size_t cur_size = even(count_) * tsize(type_);
   const std::size_t new_size = even(count) * tsize(type_);
   if (!mem || new_size > cur_size) {
-    CHECK(!locked_) << "Tensor is locked";
     mem = make_shared<SyncedMemory>(new_size);
   }
   count_ = count;
@@ -54,8 +55,6 @@ void Tensor::convert(Type new_type) {
   if (new_type == type_) {
     return;
   }
-  CHECK(!locked_) << "Tensor is locked and its type " << Type_Name(type_) << " can't be changed to "
-                  << Type_Name(new_type);
   const shared_ptr<SyncedMemory>& current_mem = synced_mem();
   shared_ptr<SyncedMemory>& new_mem = synced_arrays_->at(new_type);
 
@@ -69,7 +68,7 @@ void Tensor::convert(Type new_type) {
       copy_helper(data_gpu, count_,
           data_gpu ? current_mem->gpu_data() : current_mem->cpu_data(),
           type_,
-          data_gpu ? new_mem->mutable_gpu_data(false) : new_mem->mutable_cpu_data(false),
+          data_gpu ? new_mem->mutable_gpu_data() : new_mem->mutable_cpu_data(),
           new_type);
     }
   } // we just trust its current status otherwise
@@ -159,14 +158,14 @@ void Tensor::scale(float scale, void* handle, bool synced) {
 }
 
 void Tensor::cpu_scale(float scale) {
-  shared_ptr<SyncedMemory>& mem = mutable_synced_mem(false);
+  shared_ptr<SyncedMemory>& mem = mutable_synced_mem();
   cpu_scal(count_, type_, mem->mutable_cpu_data(), scale);
 }
 
 #ifndef CPU_ONLY
 
 void Tensor::gpu_scale(float scale, cublasHandle_t cublas_handle, bool synced) {
-  shared_ptr<SyncedMemory>& mem = mutable_synced_mem(false);
+  shared_ptr<SyncedMemory>& mem = mutable_synced_mem();
   gpu_scal(count_, type_, mem->mutable_gpu_data(), scale, cublas_handle, synced);
 }
 
@@ -194,16 +193,16 @@ size_t Tensor::gpu_memory_use() const {
   return ret;
 }
 
-void Tensor::gpu_set(float value, bool synced, cudaStream_t stream) {
+void Tensor::gpu_set(float value, cudaStream_t stream) {
   shared_ptr<SyncedMemory>& mem = mutable_synced_mem();
   CHECK(Caffe::mode() == Caffe::GPU);
   void* data = mem->mutable_gpu_data();
   if (is_type<float>(type_)) {
-    caffe_gpu_set(count_, value, static_cast<float*>(data), synced, stream);
+    caffe_gpu_set(count_, value, static_cast<float*>(data), stream);
   } else if (is_type<float16>(type_)) {
-    caffe_gpu_set(count_, static_cast<float16>(value), static_cast<float16*>(data), synced, stream);
+    caffe_gpu_set(count_, static_cast<float16>(value), static_cast<float16*>(data), stream);
   } else if (is_type<double>(type_)) {
-    caffe_gpu_set(count_, static_cast<double>(value), static_cast<double*>(data), synced, stream);
+    caffe_gpu_set(count_, static_cast<double>(value), static_cast<double*>(data), stream);
   } else {
     LOG(FATAL) << "Unsupported data type: " << Type_Name(type_);
   }
@@ -214,7 +213,7 @@ void Tensor::gpu_set(float value, bool synced, cudaStream_t stream) {
 void Tensor::set(float value) {
   if (Caffe::mode() == Caffe::GPU) {
 #ifndef CPU_ONLY
-    this->gpu_set(value, true, nullptr);
+    this->gpu_set(value, nullptr);
 #else
     NO_GPU;
 #endif

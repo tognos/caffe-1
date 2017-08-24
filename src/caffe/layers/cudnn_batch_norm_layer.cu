@@ -74,7 +74,8 @@ void CuDNNBatchNormLayer<Ftype, Btype>::Forward_gpu(const vector<Blob*>& bottom,
         fwd_scale_bias_mean_var_desc_, scale_data, bias_data,
         factor, global_mean, global_var, epsilon, save_mean, save_inv_var));
   } else if (this->phase_ == TEST) {
-    CUDNN_CHECK(cudnnBatchNormalizationForwardInference(Caffe::cudnn_handle(), mode_,
+    CUDNN_CHECK(cudnnBatchNormalizationForwardInference(Caffe::cudnn_handle(),
+        CUDNN_BATCHNORM_SPATIAL,
         cudnn::dataType<Ftype>::one, cudnn::dataType<Ftype>::zero,
         fwd_bottom_desc_, bottom_data, fwd_top_desc_, top_data,
         fwd_scale_bias_mean_var_desc_, scale_data, bias_data,
@@ -152,11 +153,11 @@ void CuDNNBatchNormLayer<Ftype, Btype>::Backward_gpu(const vector<Blob*>& top,
       epsilon, save_mean, save_inv_var));
   CUDA_CHECK(cudaStreamSynchronize(Caffe::thread_stream()));
 
-  if (is_type<Btype>(FLOAT16)) {
+  if (this->scale_bias_ && is_type<Btype>(FLOAT16)) {
     this->blobs_[3]->CopyDiffFrom(scale_diff_tmp_);
     this->blobs_[4]->CopyDiffFrom(bias_diff_tmp_);
   }
-  }
+}
 
 INSTANTIATE_LAYER_GPU_FUNCS_FB(CuDNNBatchNormLayer);
 

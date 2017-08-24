@@ -200,6 +200,11 @@ class Net {
   const vector<string>& param_display_names() const {
     return param_display_names_;
   }
+
+  const pair<int, int>& param_layer_indices(int param_id) {
+    return param_layer_indices_[param_id];
+  }
+
   /// @brief Input and output blob numbers
   int num_inputs() const { return net_input_blobs_.size(); }
   int num_outputs() const { return net_output_blobs_.size(); }
@@ -252,14 +257,19 @@ class Net {
   void InitializeLearnableDiffSpace();
 #endif
 
-  size_t total_batch_size() const;
-
   void wait_layers_init() {
     for (Flag* flag : layer_inititialized_flags_) {
       flag->wait();
     }
   }
 
+  float global_grad_scale() {
+    return global_grad_scale_;
+  }
+
+  size_t infer_count() const {
+    return infer_count_;
+  }
 
  protected:
   // Helpers for Init.
@@ -373,6 +383,9 @@ class Net {
   Flag* solver_iter0_flag_;
   vector<Flag*> layer_inititialized_flags_;
   NetParameter net_param_;
+
+  size_t infer_count_;
+  float global_grad_scale_;
 
   static constexpr int END_OF_ITERATION = -1;
   static constexpr int END_OF_BATCH = -2;

@@ -36,49 +36,6 @@ class TBlob;
  */
 class Blob {
  public:
-  // This proxy makes sure that we can't rely on cached values while pointer
-  // to data is being used and data potentially might be changed.
-  // When pointer is actually given, proxy flushes the cache.
-  // There are use cases where we "preliminary convert data" but don't change it yet.
-  // In such cases cache is still valid until we really change data.
-  // For example, this line doesn't change blob's state:
-  //   Blob::PtrProxy<Ftype> top_data = top[i]->mutable_gpu_data<Ftype>();
-  // The state will be changed at the moment of passing a raw pointer to,
-  // let say, CuDNN routine.
-  template<typename Ptype>
-  class PtrProxy {
-   public:
-    PtrProxy() : tensor_(), is_gpu_(false), zero_new_mem_(true) {}
-
-    PtrProxy(shared_ptr<Tensor> tensor, bool is_gpu, bool zero_new_mem = true)
-        : tensor_(tensor), is_gpu_(is_gpu), zero_new_mem_(zero_new_mem) {}
-
-    operator Ptype*() {
-      CHECK(tensor_);
-      return reinterpret_cast<Ptype*>(tensor_->mutable_memory(tp<Ptype>(), is_gpu_, zero_new_mem_));
-    }
-
-    ~PtrProxy() {}
-
-    PtrProxy(PtrProxy&& other) : tensor_(std::move(other.tensor_)), is_gpu_(other.is_gpu_),
-                                 zero_new_mem_(other.zero_new_mem_) {}
-
-    PtrProxy& operator=(PtrProxy&& other) {
-      tensor_ = std::move(other.tensor_);
-      is_gpu_ = other.is_gpu_;
-      zero_new_mem_ = other.zero_new_mem_;
-      return *this;
-    }
-
-    PtrProxy(const PtrProxy&) = delete;
-    PtrProxy& operator=(const PtrProxy& other) = delete;
-
-   private:
-    shared_ptr<Tensor> tensor_;
-    bool is_gpu_;
-    bool zero_new_mem_;
-  };
-
   void Swap(Blob& other) noexcept {
     std::swap(data_tensor_, other.data_tensor_);
     std::swap(diff_tensor_, other.diff_tensor_);
@@ -137,24 +94,16 @@ class Blob {
     return diff_tensor_ ? diff_tensor_->type() : last_diff_type_;
   }
 
-  void lock_data() {
-    data_tensor_->lock_tensor();
-  }
-
-  void lock_diff() {
-    diff_tensor_->lock_tensor();
-  }
-
   bool diff_equals(const Blob& other) const {
     return diff_tensor_ == other.diff_tensor_;
   }
 
   void allocate_data(bool on_gpu = true) {
-    data_tensor_->mutable_memory(data_tensor_->type(), on_gpu);
+    data_tensor_->current_memory(on_gpu);
   }
 
   void allocate_diff(bool on_gpu = true) {
-    diff_tensor_->mutable_memory(diff_tensor_->type(), on_gpu);
+    diff_tensor_->current_memory(on_gpu);
   }
 
   size_t cpu_memory_data_use() const;
@@ -387,26 +336,15 @@ class Blob {
   }
 
   template<typename Dtype>
-  PtrProxy<Dtype> mutable_cpu_data(bool zero_new_mem = true) {
+  Dtype* mutable_cpu_data() {
     convert_data(tp<Dtype>());
-    return PtrProxy<Dtype>(data_tensor_, false, zero_new_mem);
+    return static_cast<Dtype*>(data_tensor_->mutable_synced_mem()->mutable_cpu_data());
   }
 
   template<typename Dtype>
-  PtrProxy<Dtype> mutable_cpu_diff(bool zero_new_mem = true) {
+  Dtype* mutable_cpu_diff() {
     convert_diff(tp<Dtype>());
-    return PtrProxy<Dtype>(diff_tensor_, false, zero_new_mem);
-  }
-
-  // pycaffe needs these two, do NOT use them anywhere else
-  template<typename Dtype>
-  Dtype* mutable_cpu_data_raw() {
-    return (Dtype*) Blob::mutable_cpu_data<Dtype>();
-  }
-
-  template<typename Dtype>
-  Dtype* mutable_cpu_diff_raw() {
-    return (Dtype*) Blob::mutable_cpu_diff<Dtype>();
+    return static_cast<Dtype*>(diff_tensor_->mutable_synced_mem()->mutable_cpu_data());
   }
 
   // Element-wise accessor. Might be slow due to syncing from GPU to CPU.
@@ -505,9 +443,11 @@ class Blob {
    */
   void ShareDiff(const Blob& other);
 
-
   template<typename Dtype>
-  void ToProto(BlobProto* proto, bool write_diff = false) const;
+  void ToProto(BlobProto* proto, bool store_in_old_format, bool write_diff = false) const;
+  template<typename Dtype>
+  void ToProtoBVLC(BlobProto* proto, bool write_diff = false) const;
+
   void FromProto(const BlobProto& proto, bool reshape = true);
   bool ShapeEquals(const BlobProto& other);
   std::string to_string(int indent = 0) const;  // debug helper
@@ -572,15 +512,15 @@ class Blob {
   }
 
   template<typename Dtype>
-  PtrProxy<Dtype> mutable_gpu_data(bool zero_new_mem = true) {
+  Dtype* mutable_gpu_data() {
     convert_data(tp<Dtype>());
-    return PtrProxy<Dtype>(data_tensor_, true, zero_new_mem);
+    return static_cast<Dtype*>(data_tensor_->mutable_synced_mem()->mutable_gpu_data());
   }
 
   template<typename Dtype>
-  PtrProxy<Dtype> mutable_gpu_diff(bool zero_new_mem = true) {
+  Dtype* mutable_gpu_diff() {
     convert_diff(tp<Dtype>());
-    return PtrProxy<Dtype>(diff_tensor_, true, zero_new_mem);
+    return static_cast<Dtype*>(diff_tensor_->mutable_synced_mem()->mutable_gpu_data());
   }
 
   void async_gpu_push() {
@@ -701,19 +641,18 @@ class TBlob : public Blob {
   }
 
   template<typename T = Dtype>
-  PtrProxy <T> mutable_cpu_data(bool zero_new_mem = true) {
+  T* mutable_cpu_data() {
     check_integrity(true, data_type(), tp<T>());
-    return Blob::mutable_cpu_data<T>(zero_new_mem);
+    return Blob::mutable_cpu_data<T>();
   }
 
   template<typename T = Dtype>
-  PtrProxy <T> mutable_cpu_diff(bool zero_new_mem = true) {
+  T* mutable_cpu_diff() {
     check_integrity(false, diff_type(), tp<T>());
-    return Blob::mutable_cpu_diff<T>(zero_new_mem);
+    return Blob::mutable_cpu_diff<T>();
   }
 
 #ifndef CPU_ONLY
-
   template<typename T = Dtype>
   const T* gpu_data() const {
     check_integrity(true, data_type(), tp<T>());
@@ -727,15 +666,15 @@ class TBlob : public Blob {
   }
 
   template<typename T = Dtype>
-  PtrProxy <T> mutable_gpu_data(bool zero_new_mem = true) {
+  T* mutable_gpu_data() {
     check_integrity(true, data_type(), tp<T>());
-    return Blob::mutable_gpu_data<T>(zero_new_mem);
+    return Blob::mutable_gpu_data<T>();
   }
 
   template<typename T = Dtype>
-  PtrProxy <T> mutable_gpu_diff(bool zero_new_mem = true) {
+  T* mutable_gpu_diff() {
     check_integrity(false, diff_type(), tp<T>());
-    return Blob::mutable_gpu_diff<T>(zero_new_mem);
+    return Blob::mutable_gpu_diff<T>();
   }
 #endif
 

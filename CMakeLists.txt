@@ -10,9 +10,12 @@ endif()
 project(Caffe C CXX)
 
 # ---[ Caffe version
-set(CAFFE_TARGET_VERSION "0.16.1")
+set(CAFFE_TARGET_VERSION "0.16.3")
 set(CAFFE_TARGET_SOVERSION "0.16")
 add_definitions(-DCAFFE_VERSION=${CAFFE_TARGET_VERSION})
+
+# Skip `typedef __half half;`
+add_definitions(-DCUDA_NO_HALF=1)
 
 # ---[ Using cmake scripts and modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
@@ -55,6 +58,11 @@ caffe_option(USE_LMDB "Build with lmdb" ON)
 caffe_option(ALLOW_LMDB_NOLOCK "Allow MDB_NOLOCK when reading LMDB files (only if necessary)" OFF)
 caffe_option(TEST_FP16 "Build Caffe Tests with 16 bit mode included" OFF)
 caffe_option(NO_NVML "Build Caffe Tests without NVML (i.e. no CPU affinity)" OFF)
+
+if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "^aarch")
+  # Tegra
+  set(NO_NVML ON)
+endif()
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
