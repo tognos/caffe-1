@@ -255,7 +255,9 @@ class Transformer:
                 ms = (1,) + ms
             if len(ms) != 3:
                 raise ValueError('Mean shape invalid')
-            if ms != self.inputs[in_][1:]:
+
+            in_shape = np.array(self.inputs[in_][1:])
+            if (ms != in_shape).any():
                 raise ValueError('Mean shape incompatible with input shape.')
         self.mean[in_] = mean
 
