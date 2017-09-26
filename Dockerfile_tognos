@@ -1,4 +1,4 @@
-FROM tognos_webclient_os
+FROM tognos_webdemo_os
 
 ENV PYTHONPATH "/nv-caffe/python"
 
