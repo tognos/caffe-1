@@ -8,4 +8,4 @@ ADD . /nv-caffe
 
 RUN pip install -r /nv-caffe/python/requirements.txt
 
-RUN cd /nv-caffe && mkdir -p _build && cd _build && cmake -DCUDA_ARCH_NAME="Manual" -DCUDA_ARCH_BIN="30 35 50 52 60 61" -DCUDA_ARCH_PTX="" .. && make -j9
+RUN cd /nv-caffe && mkdir -p _docker_build && cd _docker_build && cmake -DCUDA_ARCH_NAME="Manual" -DCUDA_ARCH_BIN="30 35 50 52 60 61" -DCUDA_ARCH_PTX="" .. && make -j9
